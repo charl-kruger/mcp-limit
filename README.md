@@ -56,13 +56,13 @@ Agent writes code to search the spec and execute API calls.
 
 | Tool      | Description                                                                   |
 | --------- | ----------------------------------------------------------------------------- |
-| `search`  | Write JavaScript to query `spec.paths` and find endpoints                     |
+| `search`  | Write JavaScript to query `spec.paths` (optional `only_get` filter)           |
 | `execute` | Write JavaScript to call `cloudflare.request()` with the discovered endpoints |
 
 ```
 Agent                         MCP Server
   │                               │
-  ├──search({code: "..."})───────►│ Execute code against spec.json
+  ├──search({code: "...", only_get: true})──►│ Execute code against runtime-filtered spec.json
   │◄──[matching endpoints]────────│
   │                               │
   ├──execute({code: "..."})──────►│ Execute code against Cloudflare API
@@ -93,6 +93,21 @@ search({
         if (op.tags?.some(t => t.toLowerCase() === 'workers')) {
           results.push({ method: method.toUpperCase(), path, summary: op.summary });
         }
+      }
+    }
+    return results;
+  }`,
+});
+
+// Optional: restrict search to GET endpoints only
+search({
+  only_get: true,
+  code: `async () => {
+    const results = [];
+    for (const [path, methods] of Object.entries(spec.paths)) {
+      const op = methods.get;
+      if (op?.tags?.some(t => t.toLowerCase() === 'workers')) {
+        results.push({ method: "GET", path, summary: op.summary });
       }
     }
     return results;

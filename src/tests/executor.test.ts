@@ -245,9 +245,19 @@ describe('GraphQL Support', () => {
 })
 
 describe('Search Executor', () => {
-  const mockSpec = { paths: { '/test': { get: { summary: 'Test endpoint' } } } }
+  const mockSpec = {
+    paths: {
+      '/test': {
+        get: { summary: 'Test GET endpoint' },
+        post: { summary: 'Test POST endpoint' }
+      },
+      '/write-only': {
+        post: { summary: 'Write-only endpoint' }
+      }
+    }
+  }
 
-  it('should read spec from R2 and embed in search worker', async () => {
+  it('should read full spec from R2 when only_get is omitted', async () => {
     let capturedWorkerCode = ''
     const mockEnv = {
       CLOUDFLARE_API_BASE: 'https://api.cloudflare.com/client/v4',
@@ -274,7 +284,42 @@ describe('Search Executor', () => {
 
     expect(mockEnv.SPEC_BUCKET.get).toHaveBeenCalledWith('spec.json')
     expect(capturedWorkerCode).toContain('/test')
-    expect(capturedWorkerCode).toContain('Test endpoint')
+    expect(capturedWorkerCode).toContain('Test GET endpoint')
+    expect(capturedWorkerCode).toContain('Test POST endpoint')
+    expect(capturedWorkerCode).toContain('/write-only')
+    expect(capturedWorkerCode).not.toContain('cloudflare.request')
+  })
+
+  it('should filter spec to GET when only_get is true', async () => {
+    let capturedWorkerCode = ''
+    const mockEnv = {
+      CLOUDFLARE_API_BASE: 'https://api.cloudflare.com/client/v4',
+      SPEC_BUCKET: {
+        get: vi.fn().mockResolvedValue({
+          text: async () => JSON.stringify(mockSpec)
+        })
+      },
+      LOADER: {
+        get: vi.fn((_id: string, fn: () => any) => {
+          const config = fn()
+          capturedWorkerCode = config.modules['worker.js']
+          return {
+            getEntrypoint: () => ({
+              evaluate: async () => ({ result: {}, err: undefined })
+            })
+          }
+        })
+      }
+    } as any
+
+    const executor = createSearchExecutor(mockEnv)
+    await executor('async () => { return {} }', true)
+
+    expect(mockEnv.SPEC_BUCKET.get).toHaveBeenCalledWith('spec.json')
+    expect(capturedWorkerCode).toContain('/test')
+    expect(capturedWorkerCode).toContain('Test GET endpoint')
+    expect(capturedWorkerCode).not.toContain('Test POST endpoint')
+    expect(capturedWorkerCode).not.toContain('/write-only')
     expect(capturedWorkerCode).not.toContain('cloudflare.request')
   })
 

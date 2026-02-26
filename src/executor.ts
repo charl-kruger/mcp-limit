@@ -6,6 +6,49 @@ interface SearchExecutorEntrypoint {
   evaluate(): Promise<{ result: unknown; err?: string; stack?: string }>
 }
 
+interface SearchPathItem {
+  get?: unknown
+}
+
+interface SearchSpec {
+  paths: Record<string, SearchPathItem>
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function filterSearchSpecToGet(specJson: string): SearchSpec {
+  let parsedSpec: unknown
+  try {
+    parsedSpec = JSON.parse(specJson)
+  } catch {
+    throw new Error('spec.json in R2 is not valid JSON')
+  }
+
+  if (!isRecord(parsedSpec)) {
+    throw new Error('spec.json must be a JSON object')
+  }
+
+  if (!isRecord(parsedSpec.paths)) {
+    throw new Error('spec.json must contain a paths object')
+  }
+
+  const filteredPaths: Record<string, SearchPathItem> = {}
+
+  for (const [path, pathItem] of Object.entries(parsedSpec.paths)) {
+    if (!isRecord(pathItem)) {
+      throw new Error(`Invalid path item in spec.json for path: ${path}`)
+    }
+
+    if (pathItem.get !== undefined) {
+      filteredPaths[path] = { get: pathItem.get }
+    }
+  }
+
+  return { paths: filteredPaths }
+}
+
 export function createCodeExecutor(env: Env, ctx: ExecutionContext) {
   const apiBase = env.CLOUDFLARE_API_BASE
 
@@ -136,11 +179,13 @@ export default class CodeExecutor extends WorkerEntrypoint {
 }
 
 export function createSearchExecutor(env: Env) {
-  return async (code: string): Promise<unknown> => {
+  return async (code: string, onlyGet?: boolean): Promise<unknown> => {
     const obj = await env.SPEC_BUCKET.get('spec.json')
     if (!obj)
       throw new Error('spec.json not found in R2. Run the scheduled handler to populate it.')
     const specJson = await obj.text()
+    const searchSpecJson =
+      onlyGet === true ? JSON.stringify(filterSearchSpecToGet(specJson)) : specJson
 
     const workerId = `cloudflare-search-${crypto.randomUUID()}`
 
@@ -152,7 +197,7 @@ export function createSearchExecutor(env: Env) {
         'worker.js': `
 import { WorkerEntrypoint } from "cloudflare:workers";
 
-const spec = ${specJson};
+const spec = ${searchSpecJson};
 
 export default class SearchExecutor extends WorkerEntrypoint {
   async evaluate() {

@@ -85,6 +85,7 @@ export async function createServer(
     'search',
     {
       description: `Search the Cloudflare OpenAPI spec. All $refs are pre-resolved inline.
+Set only_get=true to runtime-filter search results to GET operations for performance.
 
 Products: ${products.slice(0, 30).join(', ')}... (${products.length} total)
 
@@ -93,12 +94,12 @@ ${SPEC_TYPES}
 
 Examples:
 
-// Find endpoints by product
+// Find endpoints by product (all methods)
 async () => {
   const results = [];
   for (const [path, methods] of Object.entries(spec.paths)) {
     for (const [method, op] of Object.entries(methods)) {
-      if (op.tags?.some(t => t.toLowerCase() === 'workers')) {
+      if (op?.tags?.some(t => t.toLowerCase() === 'workers')) {
         results.push({ method: method.toUpperCase(), path, summary: op.summary });
       }
     }
@@ -106,10 +107,16 @@ async () => {
   return results;
 }
 
-// Get endpoint with requestBody schema (refs are resolved)
+// Find GET endpoints only (pass only_get=true in tool input)
 async () => {
-  const op = spec.paths['/accounts/{account_id}/d1/database']?.post;
-  return { summary: op?.summary, requestBody: op?.requestBody };
+  const results = [];
+  for (const [path, methods] of Object.entries(spec.paths)) {
+    const op = methods.get;
+    if (op?.tags?.some(t => t.toLowerCase() === 'workers')) {
+      results.push({ method: 'GET', path, summary: op.summary });
+    }
+  }
+  return results;
 }
 
 // Get endpoint parameters
@@ -118,12 +125,18 @@ async () => {
   return op?.parameters;
 }`,
       inputSchema: {
-        code: z.string().describe('JavaScript async arrow function to search the OpenAPI spec')
+        code: z.string().describe('JavaScript async arrow function to search the OpenAPI spec'),
+        only_get: z
+          .boolean()
+          .optional()
+          .describe(
+            'If true, search scope includes only GET endpoints. If omitted or false, all methods are searchable.'
+          )
       }
     },
-    async ({ code }) => {
+    async ({ code, only_get }) => {
       try {
-        const result = await executeSearch(code)
+        const result = await executeSearch(code, only_get)
         return { content: [{ type: 'text', text: truncateResponse(result) }] }
       } catch (error) {
         return {
